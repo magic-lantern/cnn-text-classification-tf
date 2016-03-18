@@ -30,7 +30,7 @@ tf.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on 
 FLAGS = tf.flags.FLAGS
 FLAGS.batch_size
 print("\nParameters:")
-for attr, value in sorted(FLAGS.__flags.iteritems()):
+for attr, value in sorted(FLAGS.__flags.items()):
     print("{}={}".format(attr.upper(), value))
 print("")
 
@@ -59,7 +59,11 @@ print("Train/Dev split: {:d}/{:d}".format(len(y_train), len(y_dev)))
 
 with tf.Graph().as_default():
     session_conf = tf.ConfigProto(
+      # The allow_soft_placement setting allows TensorFlow to fall back on a device with
+      # a certain operation implemented when the preferred device doesn’t exist.
       allow_soft_placement=FLAGS.allow_soft_placement,
+      # log_device_placement is set, TensorFlow log on which devices (CPU or GPU) it
+      # places operations. That’s useful for debugging.
       log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf)
     with sess.as_default():
@@ -68,7 +72,7 @@ with tf.Graph().as_default():
             num_classes=2,
             vocab_size=len(vocabulary),
             embedding_size=FLAGS.embedding_dim,
-            filter_sizes=map(int, FLAGS.filter_sizes.split(",")),
+            filter_sizes=list(map(int, FLAGS.filter_sizes.split(","))),
             num_filters=FLAGS.num_filters,
             l2_reg_lambda=FLAGS.l2_reg_lambda)
 
@@ -78,6 +82,14 @@ with tf.Graph().as_default():
         grads_and_vars = optimizer.compute_gradients(cnn.loss)
         train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
+        '''
+        TensorFlow has a concept of a summaries, which allow you to keep track of and
+        visualize various quantities during training and evaluation. For example, you
+        probably want to keep track of how your loss and accuracy evolve over time.
+        You can also keep track of more complex quantities, such as histograms of layer
+        activations. Summaries are serialized objects, and they are written to disk using
+        a SummaryWriter.
+        '''
         # Keep track of gradient values and sparsity (optional)
         grad_summaries = []
         for g, v in grads_and_vars:
@@ -107,6 +119,12 @@ with tf.Graph().as_default():
         dev_summary_dir = os.path.join(out_dir, "summaries", "dev")
         dev_summary_writer = tf.train.SummaryWriter(dev_summary_dir, sess.graph_def)
 
+        '''
+        Another TensorFlow feature you typically want to use is checkpointing – saving the
+        parameters of your model to restore them later on. Checkpoints can be used to
+        continue training at a later point, or to pick the best parameters setting using
+        early stopping. Checkpoints are created using a Saver object.
+        '''
         # Checkpoint directory. Tensorflow assumes this directory already exists so we need to create it
         checkpoint_dir = os.path.abspath(os.path.join(out_dir, "checkpoints"))
         checkpoint_prefix = os.path.join(checkpoint_dir, "model")
@@ -114,7 +132,7 @@ with tf.Graph().as_default():
             os.makedirs(checkpoint_dir)
         saver = tf.train.Saver(tf.all_variables())
 
-        # Initialize all variables
+        #Before we can train our model we also need to initialize the variables in our graph.
         sess.run(tf.initialize_all_variables())
 
         def train_step(x_batch, y_batch):
@@ -150,9 +168,14 @@ with tf.Graph().as_default():
             if writer:
                 writer.add_summary(summaries, step)
 
+        '''
+        Finally, we’re ready to write our training loop. We iterate over batches of our data,
+        call the train_step function for each batch, and occasionally evaluate and checkpoint
+        our model:
+        '''
         # Generate batches
         batches = data_helpers.batch_iter(
-            zip(x_train, y_train), FLAGS.batch_size, FLAGS.num_epochs)
+            list(zip(x_train, y_train)), FLAGS.batch_size, FLAGS.num_epochs)
         # Training loop. For each batch...
         for batch in batches:
             x_batch, y_batch = zip(*batch)
